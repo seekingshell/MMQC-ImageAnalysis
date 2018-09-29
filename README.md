@@ -1,6 +1,8 @@
 # MMQC-ImageAnalysis
 Find the three most prevalent colors from each image listed in urls.txt. Uses MMQC (Modified Median Cut Quantization) algorithm.
 
+IDE: IntelliJ
+
 
 
 Credit and Inspiration
