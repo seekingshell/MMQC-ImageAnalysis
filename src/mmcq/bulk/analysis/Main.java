@@ -13,32 +13,27 @@ import java.util.*;
 import mmcq.bulk.analysis.MMCQ.VBox;
 import mmcq.bulk.analysis.MMCQ.CMap;
 
+import static mmcq.bulk.analysis.MMCQ.COMPARATOR_COUNT;
+
 public class Main {
     public static void main(String args[]) throws IOException {
         List<String> imageUrls = Files.readAllLines(Paths.get("urls.txt"));
 
         PrintWriter writer = new PrintWriter(new File("MMCQ_image_analysis.csv"));
         for(String imageUrl : imageUrls) {
-            ArrayList<VBox> sortedColorPalette = processImage(imageUrl);
-            int topOfList = sortedColorPalette.size() - 1;
-
-            StringBuilder output = new StringBuilder();
-            output.append(imageUrl + ",");
-            output.append(formatRGBColor(sortedColorPalette.get(topOfList)) + ",");
-            output.append(formatRGBColor(sortedColorPalette.get(topOfList - 1)) + ",");
-            output.append(formatRGBColor(sortedColorPalette.get(topOfList - 2)) + "\n");
-
-            writer.write(output.toString());
+            saveThreePrevalentColorsToFile(imageUrl, writer);
         }
 
         writer.close();
     }
 
+    // Downloads image, has it processed using MMCQ and
+    // sorts from least to most prevalent color clusters
     private static ArrayList<VBox> processImage(String urlString) throws IOException {
         BufferedImage image = downloadImage(urlString);
 
         CMap result = ImageAnalysis.getColorMap(image, 10);
-        Collections.sort(result.vboxes, (x,y) -> x.compareTo(y));
+        Collections.sort(result.vboxes, COMPARATOR_COUNT);
 
         return result.vboxes;
     }
@@ -46,6 +41,22 @@ public class Main {
     private static BufferedImage downloadImage(String urlString) throws IOException {
         URL url = new URL(urlString);
         return ImageIO.read(url);
+    }
+
+    private static void saveThreePrevalentColorsToFile(String imageUrl, PrintWriter writer) throws IOException {
+        // sorted from least prevalent to most prevalent
+        ArrayList<VBox> sortedColorClusters = processImage(imageUrl);
+
+        // we need the top 3 colors, so pick from the end of the list
+        int topOfList = sortedColorClusters.size() - 1;
+
+        StringBuilder output = new StringBuilder();
+        output.append(imageUrl + ",");
+        output.append(formatRGBColor(sortedColorClusters.get(topOfList)) + ",");
+        output.append(formatRGBColor(sortedColorClusters.get(topOfList - 1)) + ",");
+        output.append(formatRGBColor(sortedColorClusters.get(topOfList - 2)) + "\n");
+
+        writer.write(output.toString());
     }
 
     private static String formatRGBColor(VBox vbox) {

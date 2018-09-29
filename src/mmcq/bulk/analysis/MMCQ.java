@@ -141,21 +141,6 @@ public class MMCQ {
             return (rval >= r1 && rval <= r2 && gval >= g1 && gval <= g2 && bval >= b1
                     && bval <= b2);
         }
-
-        public int compareTo(VBox o2) {
-            int o2Count = o2.count(false);
-            if(this._count < o2Count) {
-                return -1;
-            }
-            else if(this._count == o2Count) {
-                return 0;
-            }
-            else {
-                // greater than
-                return 1;
-            }
-        }
-
     }
 
     /**
@@ -496,7 +481,7 @@ public class MMCQ {
         }
     }
 
-    private static final Comparator<VBox> COMPARATOR_COUNT = new Comparator<VBox>() {
+    public static final Comparator<VBox> COMPARATOR_COUNT = new Comparator<VBox>() {
         @Override
         public int compare(VBox a, VBox b) {
             return a.count(false) - b.count(false);
