@@ -8,17 +8,47 @@ import java.util.List;
 
 public class MMCQ {
 
-    private static final int SIGBITS = 5;                       // # of bits per color value (rgb). Losing 3 least sig
-                                                                // bits for each RGB value has little effect on final color
-    private static final int RSHIFT = 8 - SIGBITS;              // represents the shift amount to go from 8-bit input
-                                                                // color value to what we expect (SIGBITS)
-    private static final int MULT = 1 << RSHIFT;
-    private static final int HISTOSIZE = 1 << (3 * SIGBITS);    // size of the histogram for RGB color space
-                                                                // 3 = three colors (RGB)
+    /**
+     * what we've defined as the standard intensity value representation for most hardware
+     */
+    private static final int HARDWARE_INTENSITY_NUM_OF_BITS = 8;
+    /**
+     * # of bits per intensity value (rgb). Losing 3 least sigbits for each RGB value has little effect on final color
+     */
+    private static final int SIGBITS = 5;
+    /**
+     * represents the shift amount to go from the hardware intensity bit representation to what we expect (SIGBITS)
+     */
+    private static final int RSHIFT = HARDWARE_INTENSITY_NUM_OF_BITS - SIGBITS;
+    /**
+     * helps convert intensity to value of the range represented for HARDWARE_INTENSITY_NUM_OF_BITS to drive hardware pixel
+     *
+     * EXAMPLE: 8-bit hardware representation, our intensity value is 5-bits.
+     * 5-bit value is represented at each increment of 5 from 0-255
+     * Our step value is 2^3 so that intensity=5 is actually 5*(2^3) so it's correctly represented in the 0-255 hardware scale.
+     */
+    private static final int STEP_VALUE = 1 << RSHIFT;
+    /**
+     * size of the histogram for RGB color space 3 = three colors (RGB)
+     */
+    private static final int HISTOSIZE = 1 << (3 * SIGBITS);
+    /**
+     * number of possible intensity values for red or blue or green axis
+     */
     private static final int VBOX_LENGTH = 1 << SIGBITS;
-    private static final double FRACT_BY_POPULATION = 0.75;     // fraction of VBoxes we divide based on
-                                                                // population(# of pixels in VBox)
+    /**
+     * fraction of VBoxes we divide based on population(# of pixels in VBox)
+     */
+    private static final double FRACT_BY_POPULATION = 0.75;
     private static final int MAX_ITERATIONS = 1000;
+    /**
+     * when we do max-min subtraction, a color represented is lost so we need to add it back in
+     */
+    private static final int ADD_LOST_COLOR = 1;
+    /**
+     * when dividing by 2, force result to round up
+     */
+    private static final int FORCE_ROUND_UP = 1;
 
     /**
      * Get reduced-space color index for a pixel.
@@ -37,8 +67,8 @@ public class MMCQ {
     }
 
     /**
-     * 3D color space box. Each color value represents a side of the box.
-     * Example: from point rMin -> point rMax
+     * 3D color space box. Each color value represents the axises of the box.
+     * Example: from point rMin -> point rMax is the red axis
      */
     public static class VBox {
         int rMin;
@@ -71,16 +101,22 @@ public class MMCQ {
                     + " / bMax: " + bMax;
         }
 
-        // volume of this VBox calculated by our rgb side values
+        /**
+         * volume of this VBox calculated by our rgb axis values
+         */
         public int volume(boolean force) {
             if (_volume == null || force) {
-                _volume = ((rMax - rMin + 1) * (gMax - gMin + 1) * (bMax - bMin + 1));
+                _volume = ((rMax - rMin + ADD_LOST_COLOR) * (gMax - gMin + ADD_LOST_COLOR) * (bMax - bMin + ADD_LOST_COLOR));
             }
 
             return _volume;
         }
 
-        // number of pixels in this VBox
+        /**
+         * Number of pixels in this VBox
+         * @param force
+         *              force a re-count
+         */
         public int count(boolean force) {
             if (_count == null || force) {
                 int numOfPixels = 0;
@@ -108,7 +144,11 @@ public class MMCQ {
             return new VBox(rMin, rMax, gMin, gMax, bMin, bMax, histo);
         }
 
-        // finds the average color represented by the VBox
+        /**
+         * Finds the average color represented by the VBox
+         * @param force
+         *              force getting the average even if it exists
+         */
         public int[] avg(boolean force) {
             if (_avg == null || force) {
                 int totalPixels = 0;
@@ -125,9 +165,13 @@ public class MMCQ {
                             histoIndex = getColorIndex(r, g, b);
                             histoVal = histo[histoIndex];
                             totalPixels += histoVal;
-                            rsum += (histoVal * (r + 0.5) * MULT);
-                            gsum += (histoVal * (g + 0.5) * MULT);
-                            bsum += (histoVal * (b + 0.5) * MULT);
+                            // convert value intensity to value in range 0-255 to drive hardware pixel (8-bit)
+                            // Example: 5-bit value is represented at each increment of 5 from 0-255
+                            // 0.5 is to round to next intensity to avoid truncation when we divide against
+                            // total pixel amount later (which would lessen the intensity of the value)
+                            rsum += (histoVal * ((r + 0.5) * STEP_VALUE));
+                            gsum += (histoVal * ((g + 0.5) * STEP_VALUE));
+                            bsum += (histoVal * ((b + 0.5) * STEP_VALUE));
                         }
                     }
                 }
@@ -137,16 +181,19 @@ public class MMCQ {
                             gsum/totalPixels,
                             bsum/totalPixels};
                 } else {
-                    _avg = new int[] {MULT * (rMin + rMax + 1) / 2,
-                            MULT * (gMin + gMax + 1) / 2,
-                            MULT * (bMin + bMax + 1) / 2};
+                    _avg = new int[] {STEP_VALUE * (rMin + rMax + FORCE_ROUND_UP) / 2,
+                            STEP_VALUE * (gMin + gMax + FORCE_ROUND_UP) / 2,
+                            STEP_VALUE * (bMin + bMax + FORCE_ROUND_UP) / 2};
                 }
             }
 
             return _avg;
         }
 
-        // Is the input color represented in the VBox?
+        /**
+         * Is the input color represented in the VBox?
+         * @param pixel
+         */
         public boolean contains(int[] pixel) {
             int rval = pixel[0] >> RSHIFT;
             int gval = pixel[1] >> RSHIFT;
@@ -168,7 +215,9 @@ public class MMCQ {
             vboxes.add(box);
         }
 
-        // gets the average color from each VBox
+        /**
+         * Gets the average color from each VBox
+         */
         public int[][] palette() {
             int numVBoxes = vboxes.size();
             int[][] palette = new int[numVBoxes][];
@@ -182,7 +231,10 @@ public class MMCQ {
             return vboxes.size();
         }
 
-        // finds the closest color represented by the palette
+        /**
+         * Finds the closest color represented by the palette
+         * @param color
+         */
         public int[] map(int[] color) {
             int numVBoxes = vboxes.size();
             for (int i = 0; i < numVBoxes; i++) {
@@ -194,8 +246,9 @@ public class MMCQ {
             return nearest(color);
         }
 
-        // try to find the average color from one of the Vboxes
-        // that is closest to our input color
+        /**
+         * Try to find the average color from one of the Vboxes that is closest to our input color
+         */
         public int[] nearest(int[] inputColor) {
             double minResult = Double.MAX_VALUE;
             double result;
@@ -205,10 +258,12 @@ public class MMCQ {
             for (int i = 0; i < numVBoxes; i++) {
                 int[] vbColor = vboxes.get(i).avg(false);
 
-                // determine how large the gap between the RGB values is
-                // result equal to zero means the values are equal
-                // lower result means the values are closer
-                // larger result means the values are further apart
+                /**
+                 * determine how large the gap between the RGB values is
+                 * result = 0; the values are equal
+                 * lower result means the values are closer
+                 * higher result means the values are further apart
+                 */
                 result = Math.sqrt(
                         Math.pow(inputColor[0] - vbColor[0], 2) + Math.pow(inputColor[1] - vbColor[1], 2)
                                 + Math.pow(inputColor[2] - vbColor[2], 2));
@@ -235,8 +290,10 @@ public class MMCQ {
         for (int i = 0; i < numPixels; i++) {
             int[] pixel = pixels[i];
 
-            // we are receiving 8-bit color values, so we need to shift to meet
-            // bit representation expectations set by SIGBITS
+            /**
+             * we are receiving 8-bit color values, so we need to shift to meet
+             * bit representation expectations set by SIGBITS
+             */
             rval = pixel[0] >> RSHIFT;
             gval = pixel[1] >> RSHIFT;
             bval = pixel[2] >> RSHIFT;
@@ -247,179 +304,204 @@ public class MMCQ {
     }
 
     private static VBox vboxFromPixels(int[][] pixels, int[] histo) {
-        int rmin = 1000000, rmax = 0;
-        int gmin = 1000000, gmax = 0;
-        int bmin = 1000000, bmax = 0;
+        int rMin = 1000000, rMax = 0;
+        int gMin = 1000000, gMax = 0;
+        int bMin = 1000000, bMax = 0;
 
-        int rval, gval, bval;
+        int rVal, gVal, bVal;
 
-        // find min/max
+        /**
+         * find min/max to determine the range of the VBox we are creating
+         * aka the points to measure the axises of our color space (ex. red axis: rMin->rMax)
+         */
         int numPixels = pixels.length;
         for (int i = 0; i < numPixels; i++) {
             int[] pixel = pixels[i];
-            rval = pixel[0] >> RSHIFT;
-            gval = pixel[1] >> RSHIFT;
-            bval = pixel[2] >> RSHIFT;
+            /**
+             * we are receiving 8-bit color values, so we need to shift to meet
+             * bit representation expectations set by SIGBITS
+             */
+            rVal = pixel[0] >> RSHIFT;
+            gVal = pixel[1] >> RSHIFT;
+            bVal = pixel[2] >> RSHIFT;
 
-            if (rval < rmin) {
-                rmin = rval;
-            } else if (rval > rmax) {
-                rmax = rval;
+            if (rVal < rMin) {
+                rMin = rVal;
+            } else if (rVal > rMax) {
+                rMax = rVal;
             }
 
-            if (gval < gmin) {
-                gmin = gval;
-            } else if (gval > gmax) {
-                gmax = gval;
+            if (gVal < gMin) {
+                gMin = gVal;
+            } else if (gVal > gMax) {
+                gMax = gVal;
             }
 
-            if (bval < bmin) {
-                bmin = bval;
-            } else if (bval > bmax) {
-                bmax = bval;
+            if (bVal < bMin) {
+                bMin = bVal;
+            } else if (bVal > bMax) {
+                bMax = bVal;
             }
         }
 
-        return new VBox(rmin, rmax, gmin, gmax, bmin, bmax, histo);
+        return new VBox(rMin, rMax, gMin, gMax, bMin, bMax, histo);
     }
 
-    private static VBox[] medianCutApply(int[] histo, VBox vbox) {
-        if (vbox.count(false) == 0) {
+    private static VBox[] medianCutApply(int[] histo, VBox orgVbox) {
+        if (orgVbox.count(false) == 0) {
             return null;
         }
 
-        // only one pixel, no split
-        if (vbox.count(false) == 1) {
-            return new VBox[] {vbox.clone(), null};
+        // only one pixel, no split. return original vbox
+        if (orgVbox.count(false) == 1) {
+            return new VBox[] {orgVbox.clone(), null};
         }
 
-        int rw = vbox.rMax - vbox.rMin + 1;
-        int gw = vbox.gMax - vbox.gMin + 1;
-        int bw = vbox.bMax - vbox.bMin + 1;
-        int maxw = Math.max(Math.max(rw, gw), bw);
+        // calculate axis values of the VBox (color space)
+        int rAxis = orgVbox.rMax - orgVbox.rMin + ADD_LOST_COLOR;
+        int gAxis = orgVbox.gMax - orgVbox.gMin + ADD_LOST_COLOR;
+        int bAxis = orgVbox.bMax - orgVbox.bMin + ADD_LOST_COLOR;
+        int maxAxis = Math.max(Math.max(rAxis, gAxis), bAxis);
 
         // Find the partial sum arrays along the selected axis.
         int total = 0;
+
+        /**
+         * the sum of the previous(if exists) and the pixel count of each present index of range(longest axis)
+         */
         int[] partialsum = new int[VBOX_LENGTH];
         Arrays.fill(partialsum, -1); // -1 = not set / 0 = 0
+
         int[] lookaheadsum = new int[VBOX_LENGTH];
         Arrays.fill(lookaheadsum, -1); // -1 = not set / 0 = 0
-        int i, j, k, sum, index;
+        int sum, index;
 
-        if (maxw == rw) {
-            for (i = vbox.rMin; i <= vbox.rMax; i++) {
+        // calculate cumulative count of pixels for groups of hues ordered by range of longest axis
+        if (maxAxis == rAxis) {
+            for (int r = orgVbox.rMin; r <= orgVbox.rMax; r++) {
                 sum = 0;
-                for (j = vbox.gMin; j <= vbox.gMax; j++) {
-                    for (k = vbox.bMin; k <= vbox.bMax; k++) {
-                        index = getColorIndex(i, j, k);
+                for (int g = orgVbox.gMin; g <= orgVbox.gMax; g++) {
+                    for (int b = orgVbox.bMin; b <= orgVbox.bMax; b++) {
+                        index = getColorIndex(r, g, b);
                         sum += histo[index];
                     }
                 }
                 total += sum;
-                partialsum[i] = total;
+                partialsum[r] = total;
             }
-        } else if (maxw == gw) {
-            for (i = vbox.gMin; i <= vbox.gMax; i++) {
+        } else if (maxAxis == gAxis) {
+            for (int g = orgVbox.gMin; g <= orgVbox.gMax; g++) {
                 sum = 0;
-                for (j = vbox.rMin; j <= vbox.rMax; j++) {
-                    for (k = vbox.bMin; k <= vbox.bMax; k++) {
-                        index = getColorIndex(j, i, k);
+                for (int r = orgVbox.rMin; r <= orgVbox.rMax; r++) {
+                    for (int b = orgVbox.bMin; b <= orgVbox.bMax; b++) {
+                        index = getColorIndex(r, g, b);
                         sum += histo[index];
                     }
                 }
                 total += sum;
-                partialsum[i] = total;
+                partialsum[g] = total;
             }
         } else
-        /* maxw == bw */
+        /* maxAxis == bAxis */
         {
-            for (i = vbox.bMin; i <= vbox.bMax; i++) {
+            for (int b = orgVbox.bMin; b <= orgVbox.bMax; b++) {
                 sum = 0;
-                for (j = vbox.rMin; j <= vbox.rMax; j++) {
-                    for (k = vbox.gMin; k <= vbox.gMax; k++) {
-                        index = getColorIndex(j, k, i);
+                for (int r = orgVbox.rMin; r <= orgVbox.rMax; r++) {
+                    for (int g = orgVbox.gMin; g <= orgVbox.gMax; g++) {
+                        index = getColorIndex(r, g, b);
                         sum += histo[index];
                     }
                 }
                 total += sum;
-                partialsum[i] = total;
+                partialsum[b] = total;
             }
         }
 
-        for (i = 0; i < VBOX_LENGTH; i++) {
+        for (int i = 0; i < VBOX_LENGTH; i++) {
             if (partialsum[i] != -1) {
+                /**
+                 * the pixel sum of the groups of hues in future indices of range(longest axis)
+                 */
                 lookaheadsum[i] = total - partialsum[i];
             }
         }
 
         // determine the cut planes
-        return maxw == rw ? doCut('r', vbox, partialsum, lookaheadsum, total)
-                : maxw == gw ? doCut('g', vbox, partialsum, lookaheadsum, total)
-                        : doCut('b', vbox, partialsum, lookaheadsum, total);
+        return maxAxis == rAxis ? doCut('r', orgVbox, partialsum, lookaheadsum, total)
+                : maxAxis == gAxis ? doCut('g', orgVbox, partialsum, lookaheadsum, total)
+                        : doCut('b', orgVbox, partialsum, lookaheadsum, total);
     }
 
     private static VBox[] doCut(
             char color,
-            VBox vbox,
+            VBox orgVbox,
             int[] partialsum,
             int[] lookaheadsum,
             int total) {
-        int vbox_dim1;
-        int vbox_dim2;
+        int vbox_min;
+        int vbox_max;
 
         if (color == 'r') {
-            vbox_dim1 = vbox.rMin;
-            vbox_dim2 = vbox.rMax;
+            vbox_min = orgVbox.rMin;
+            vbox_max = orgVbox.rMax;
         } else if (color == 'g') {
-            vbox_dim1 = vbox.gMin;
-            vbox_dim2 = vbox.gMax;
+            vbox_min = orgVbox.gMin;
+            vbox_max = orgVbox.gMax;
         } else
         /* color == 'b' */
         {
-            vbox_dim1 = vbox.bMin;
-            vbox_dim2 = vbox.bMax;
+            vbox_min = orgVbox.bMin;
+            vbox_max = orgVbox.bMax;
         }
 
         int left, right;
         VBox vbox1 = null, vbox2 = null;
-        int d2, count2;
+        int vboxCutVal, count2;
 
-        for (int i = vbox_dim1; i <= vbox_dim2; i++) {
+        /**
+         * find first value in range of min to max whose cumulative pixel count is greater than half
+         * the total pixel count.
+         * This insures that when we split the original vbox, the left(vbox1) has a greater population than right(vbox2)
+         */
+        for (int i = vbox_min; i <= vbox_max; i++) {
             if (partialsum[i] > total / 2) {
-                vbox1 = vbox.clone();
-                vbox2 = vbox.clone();
+                vbox1 = orgVbox.clone();
+                vbox2 = orgVbox.clone();
 
-                left = i - vbox_dim1;
-                right = vbox_dim2 - i;
+                left = i - vbox_min;
+                right = vbox_max - i;
 
                 if (left <= right) {
-                    d2 = Math.min(vbox_dim2 - 1, ~~(i + right / 2));
+                    vboxCutVal = Math.min(vbox_max - 1, (i + (right / 2)));
                 } else {
                     // 2.0 and cast to int is necessary to have the same behaviour as in JavaScript
-                    d2 = Math.max(vbox_dim1, ~~((int) (i - 1 - left / 2.0)));
+                    vboxCutVal = Math.max(vbox_min, ((int) (i - 1 - (left / 2.0))));
                 }
 
                 // avoid 0-count boxes
-                while (d2 < 0 || partialsum[d2] <= 0) {
-                    d2++;
+                while (vboxCutVal < 0 || partialsum[vboxCutVal] <= 0) {
+                    vboxCutVal++;
                 }
-                count2 = lookaheadsum[d2];
-                while (count2 == 0 && d2 > 0 && partialsum[d2 - 1] > 0) {
-                    count2 = lookaheadsum[--d2];
+                count2 = lookaheadsum[vboxCutVal];
+                // count2 == 0: means count of pixels for value in range of current to max are empty
+                // vboxCutVal > 0: means there exists a pixel count partial sum below our split point (vboxCutVal)
+                // If needed, move split down to prevent vbox2 from containing no pixels
+                while (count2 == 0 && vboxCutVal > 0 && partialsum[vboxCutVal - 1] > 0) {
+                    count2 = lookaheadsum[--vboxCutVal];
                 }
 
                 // set dimensions
                 if (color == 'r') {
-                    vbox1.rMax = d2;
-                    vbox2.rMin = d2 + 1;
+                    vbox1.rMax = vboxCutVal;
+                    vbox2.rMin = vboxCutVal + 1;
                 } else if (color == 'g') {
-                    vbox1.gMax = d2;
-                    vbox2.gMin = d2 + 1;
+                    vbox1.gMax = vboxCutVal;
+                    vbox2.gMin = vboxCutVal + 1;
                 } else
                 /* color == 'b' */
                 {
-                    vbox1.bMax = d2;
-                    vbox2.bMin = d2 + 1;
+                    vbox1.bMax = vboxCutVal;
+                    vbox2.bMin = vboxCutVal + 1;
                 }
 
                 return new VBox[] {vbox1, vbox2};
@@ -429,7 +511,13 @@ public class MMCQ {
         throw new RuntimeException("VBox can't be cut");
     }
 
-    // maxcolors: the color amount we want in the palette
+    /**
+     *
+     * @param pixels
+     * @param maxcolors
+     *                  the amount of colors we want in the result palette
+     * @return
+     */
     public static CMap quantize(int[][] pixels, int maxcolors) {
         // short-circuit
         if (pixels.length == 0 || maxcolors < 2 || maxcolors > 256) {
@@ -440,27 +528,28 @@ public class MMCQ {
 
         // get the beginning vbox from the colors
         VBox vbox = vboxFromPixels(pixels, histo);
-        ArrayList<VBox> pq = new ArrayList<>();
-        pq.add(vbox);
+        ArrayList<VBox> vboxList = new ArrayList<>();
+        vboxList.add(vbox);
 
+        // for a fraction of the color palette generation, we subdivide based on population in VBox
         // Round up to have the same behaviour as in JavaScript
-        int target = (int) Math.ceil(FRACT_BY_POPULATION * maxcolors);
+        int fractOfTarget = (int) Math.ceil(FRACT_BY_POPULATION * maxcolors);
 
         // first set of colors, sorted by population
-        iter(pq, COMPARATOR_COUNT, target, histo);
+        iter(vboxList, COMPARATOR_COUNT, fractOfTarget, histo);
 
         // Re-sort by the product of pixel occupancy times the size in color space.
-        Collections.sort(pq, COMPARATOR_PRODUCT);
+        Collections.sort(vboxList, COMPARATOR_PRODUCT);
 
-        // next set - generate the median cuts using the (npix * vol) sorting.
-        iter(pq, COMPARATOR_PRODUCT, maxcolors - pq.size(), histo);
+        // next set (rest of color palette generation) - generate the median cuts using the (npix * vol) sorting.
+        iter(vboxList, COMPARATOR_PRODUCT, maxcolors - vboxList.size(), histo);
 
         // Reverse to put the highest elements first into the color map
-        Collections.reverse(pq);
+        Collections.reverse(vboxList);
 
         // calculate the actual colors
         CMap cmap = new CMap();
-        for (VBox vb : pq) {
+        for (VBox vb : vboxList) {
             cmap.push(vb);
         }
 
@@ -471,7 +560,7 @@ public class MMCQ {
      * Inner function to do the iteration.
      */
     private static void iter(List<VBox> orgVboxes, Comparator<VBox> comparator, int target, int[] histo) {
-        int ncolors = 1;
+        int numOfPaletteColors = 1;
         int iterationCount = 0;
         VBox vbox;
 
@@ -496,11 +585,11 @@ public class MMCQ {
             orgVboxes.add(mcVbox1);
             if (mcVbox2 != null) {
                 orgVboxes.add(mcVbox2);
-                ncolors++;
+                numOfPaletteColors++;
             }
             Collections.sort(orgVboxes, comparator);
 
-            if (ncolors >= target) {
+            if (numOfPaletteColors >= target) {
                 return;
             }
             if (iterationCount++ > MAX_ITERATIONS) {

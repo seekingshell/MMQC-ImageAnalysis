@@ -199,7 +199,9 @@ public class ImageAnalysis {
         int r, g, b;
 
         for (int i = 0; i < pixelCount; i += quality) {
+            // with every width amount of pixels, updates the row value
             int row = i / width;
+            // irregardless of how many width amount of pixels, it finds where we are in the block via remainder
             int col = i % width;
             int rgb = sourceImage.getRGB(col, row);
 
